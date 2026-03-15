@@ -1,0 +1,129 @@
+// server.js
+// Main server file - Express setup, MongoDB connection, and middleware configuration
+
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
+const helmet = require('helmet');
+
+// Database connection
+const connectDB = require('./config/database');
+
+// Routes
+const contactRoutes = require('./routes/contactRoutes');
+
+// Middleware
+const errorHandler = require('./middleware/errorHandler');
+const rateLimitMiddleware = require('./middleware/rateLimit');
+
+// Logger
+const logger = require('./utils/logger');
+
+// Initialize Express app
+const app = express();
+
+// ============================================
+// SECURITY MIDDLEWARE
+// ============================================
+
+// Helmet - Add security headers
+app.use(helmet());
+
+// CORS - Allow requests from frontend
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// ============================================
+// BODY PARSER MIDDLEWARE
+// ============================================
+
+// Parse JSON request body
+app.use(express.json({ limit: '10mb' }));
+
+// Parse URL-encoded request body
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// ============================================
+// RATE LIMITING MIDDLEWARE
+// ============================================
+
+app.use('/api/', rateLimitMiddleware);
+
+// ============================================
+// LOGGING MIDDLEWARE
+// ============================================
+
+// Log all incoming requests
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.path}`);
+  next();
+});
+
+// ============================================
+// ROUTES
+// ============================================
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Server is running',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Contact routes
+app.use('/api/contact', contactRoutes);
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+  });
+});
+
+// ============================================
+// ERROR HANDLING MIDDLEWARE
+// ============================================
+
+app.use(errorHandler);
+
+// ============================================
+// DATABASE CONNECTION & SERVER STARTUP
+// ============================================
+
+const PORT = process.env.PORT || 5000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Connect to MongoDB and start server
+connectDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      logger.info(`Server running on port ${PORT}`);
+      logger.info(`Environment: ${NODE_ENV}`);
+      logger.info(`Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+    });
+  })
+  .catch((err) => {
+    logger.error('❌ Failed to connect to MongoDB:', err);
+    process.exit(1);
+  });
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+  logger.error('Unhandled Rejection:', err);
+  process.exit(1);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception:', err);
+  process.exit(1);
+});
+
+module.exports = app;
