@@ -2,9 +2,9 @@
 // Main server file - Express setup, MongoDB connection, and middleware configuration
 
 const express = require('express');
+const helmet = require('helmet');
 const cors = require('cors');
 require('dotenv').config();
-const helmet = require('helmet');
 
 // Database connection
 const connectDB = require('./config/database');
