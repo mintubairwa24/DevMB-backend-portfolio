@@ -28,23 +28,42 @@ const app = express();
 
 // Helmet - Add security headers
 app.use(helmet());
+app.disable('x-powered-by');
 
 // CORS - Allow requests from frontend
 // Support comma-separated origins in FRONTEND_URLS, fallback to FRONTEND_URL or localhost
 const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:5173')
   .split(',')
   .map((o) => o.trim())
-  .filter(Boolean);
+  .filter(Boolean)
+  .map((o) => o.replace(/\/+$/, '').toLowerCase());
+
+const isProd = (process.env.NODE_ENV || 'development') === 'production';
+
+// If running behind a proxy (common in production), trust the first hop
+if (isProd || process.env.TRUST_PROXY === '1') {
+  app.set('trust proxy', 1);
+}
 
 app.use(cors({
   origin: (origin, cb) => {
     // allow non-browser requests (like Postman) with no origin
     if (!origin) return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(new Error(`CORS blocked for origin: ${origin}`));
+    // In development, allow any origin to avoid local CORS friction
+    if (!isProd) return cb(null, true);
+
+    const normalizedOrigin = origin.replace(/\/+$/, '').toLowerCase();
+    if (allowedOrigins.length === 0) {
+      logger.warn('No FRONTEND_URL(S) configured; allowing all origins in production.');
+      return cb(null, true);
+    }
+    if (allowedOrigins.includes(normalizedOrigin)) return cb(null, true);
+    const corsError = new Error(`CORS blocked for origin: ${origin}`);
+    corsError.status = 403;
+    return cb(corsError);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
@@ -62,7 +81,7 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // RATE LIMITING MIDDLEWARE
 // ============================================
 
-app.use('/api/', rateLimitMiddleware);
+app.use('/api', rateLimitMiddleware);
 
 // ============================================
 // LOGGING MIDDLEWARE
@@ -121,7 +140,7 @@ connectDB()
     });
   })
   .catch((err) => {
-    logger.error('❌ Failed to connect to MongoDB:', err);
+    logger.error('Failed to connect to MongoDB:', err);
     process.exit(1);
   });
 
