@@ -9,8 +9,35 @@ require('dotenv').config({
 const app = express();
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
+function normalizeOrigin(value = '') {
+  return String(value).trim().replace(/\/+$/, '');
+}
+
+function getAllowedOrigins() {
+  const configuredOrigins = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+  return configuredOrigins
+    .split(',')
+    .map((origin) => normalizeOrigin(origin))
+    .filter(Boolean);
+}
+
+const allowedOrigins = getAllowedOrigins();
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173'
+  origin(origin, callback) {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const normalizedOrigin = normalizeOrigin(origin);
+
+    if (allowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  }
 }));
 app.use(express.json());
 
@@ -212,6 +239,6 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
-  console.log(`Frontend: ${process.env.FRONTEND_URL}`);
+  console.log(`Frontend: ${allowedOrigins.join(', ')}`);
   console.log(`Owner email: ${process.env.OWNER_EMAIL}`);
 });
