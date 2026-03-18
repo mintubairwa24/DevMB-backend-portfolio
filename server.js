@@ -188,15 +188,18 @@ async function sendEmails(contact) {
       subject: 'Thank you for contacting us!',
       htmlContent: `
         <h2>Thank you, ${safeName}!</h2>
-        <p>We received your message and will get back to you as soon as possible.</p>
+        <p>Thank you for taking the time to reach out! Your message just landed in our inbox, and we're excited to learn more about your project.</p>
         <hr>
         <h3>Your Message Details:</h3>
         <p><strong>Project Type:</strong> ${safeProjectType}</p>
         <p><strong>Budget:</strong> ${safeBudget}</p>
         <p><strong>Message:</strong></p>
         <p>${safeMessage}</p>
-        <hr>
+        <p>We're currently reviewing all the details you shared and will prioritize your request. You can expect a detailed response from us within 24-48 hours. </p>
+        <br>
+        <p>In the meantime, if you have any additional questions or want to share more about your vision, feel free to reply to this email.</p>
         <p>Best regards,<br>MB.Dev</p>
+        <p>Full-Stack Developer & Creative Problem Solver</p>
       `
     });
     console.log(`Confirmation email sent to ${contact.email}`);
