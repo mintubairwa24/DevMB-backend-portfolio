@@ -222,6 +222,7 @@ async function sendEmails(contact) {
         <p><strong>Budget:</strong> ${safeBudget}</p>
         <p><strong>Message:</strong></p>
         <p>${safeMessage}</p>
+        <hr>
         <p>We're currently reviewing all the details you shared and will prioritize your request. You can expect a detailed response from us within 24-48 hours. </p>
         <br>
         <p>In the meantime, if you have any additional questions or want to share more about your vision, feel free to reply to this email.</p>
