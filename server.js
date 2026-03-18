@@ -1,158 +1,191 @@
-// server.js
-// Main server file - Express setup, MongoDB connection, and middleware configuration
-
-const dns = require('dns');
 const express = require('express');
-const helmet = require('helmet');
 const cors = require('cors');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({
+  path: path.resolve(__dirname, '../.env')
+});
 
-// Prefer IPv4 when resolving outbound hosts to avoid IPv6 connectivity issues on some platforms.
-dns.setDefaultResultOrder('ipv4first');
-
-// Database connection
-const connectDB = require('./config/database');
-
-// Routes
-const contactRoutes = require('./routes/contactRoutes');
-
-// Middleware
-const errorHandler = require('./middleware/errorHandler');
-const rateLimitMiddleware = require('./middleware/rateLimit');
-
-// Logger
-const logger = require('./utils/logger');
-
-// Initialize Express app
 const app = express();
 
 // ============================================
-// SECURITY MIDDLEWARE
+// MIDDLEWARE
 // ============================================
-
-// Helmet - Add security headers
-app.use(helmet());
-
-// CORS - Allow requests from frontend
-// Support comma-separated origins in FRONTEND_URLS, fallback to FRONTEND_URL or localhost.
-// Entries can be exact origins or simple wildcards like https://my-app-*.vercel.app
-const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:5173')
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
-
-const isProd = (process.env.NODE_ENV || 'development') === 'production';
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const matchesAllowedOrigin = (origin) =>
-  allowedOrigins.some((allowedOrigin) => {
-    if (allowedOrigin === origin) return true;
-    if (!allowedOrigin.includes('*')) return false;
-
-    const pattern = `^${escapeRegex(allowedOrigin).replace(/\\\*/g, '.*')}$`;
-    return new RegExp(pattern).test(origin);
-  });
-
 app.use(cors({
-  origin: (origin, cb) => {
-    // allow non-browser requests (like Postman) with no origin
-    if (!origin) return cb(null, true);
-    // In development, allow any origin to avoid local CORS friction
-    if (!isProd) return cb(null, true);
-    if (matchesAllowedOrigin(origin)) return cb(null, true);
-    return cb(new Error(`CORS blocked for origin: ${origin}`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173'
 }));
+app.use(express.json());
 
 // ============================================
-// BODY PARSER MIDDLEWARE
+// SIMPLE IN-MEMORY DATABASE (No MongoDB needed)
 // ============================================
-
-// Parse JSON request body
-app.use(express.json({ limit: '10mb' }));
-
-// Parse URL-encoded request body
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
-
-// ============================================
-// RATE LIMITING MIDDLEWARE
-// ============================================
-
-app.use('/api/', rateLimitMiddleware);
-
-// ============================================
-// LOGGING MIDDLEWARE
-// ============================================
-
-// Log all incoming requests
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`);
-  next();
-});
+let contacts = [];
 
 // ============================================
 // ROUTES
 // ============================================
 
-// Health check endpoint
+// Health check
 app.get('/api/health', (req, res) => {
-  res.status(200).json({
+  res.json({
     success: true,
-    message: 'Server is running',
-    timestamp: new Date().toISOString(),
+    message: 'Backend is running'
   });
 });
 
-// Contact routes
-app.use('/api/contact', contactRoutes);
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
+// Get all contacts
+app.get('/api/contact', (req, res) => {
+  res.json({
+    success: true,
+    count: contacts.length,
+    data: contacts
   });
 });
 
+// Get single contact
+app.get('/api/contact/:id', (req, res) => {
+  const contact = contacts.find(c => c.id === req.params.id);
+  if (!contact) {
+    return res.status(404).json({
+      success: false,
+      message: 'Contact not found'
+    });
+  }
+  res.json({ success: true, data: contact });
+});
+
+// Create contact (MAIN ENDPOINT)
+app.post('/api/contact', async (req, res) => {
+  try {
+    const { name, email, projectType, message, budget } = req.body;
+
+    // STEP 1: Validate
+    if (!name || !email || !message) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields',
+        errors: {
+          name: !name ? 'Name required' : '',
+          email: !email ? 'Email required' : '',
+          message: !message ? 'Message required' : ''
+        }
+      });
+    }
+
+    if (message.length < 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'Message too short',
+        errors: { message: 'Message must be at least 10 characters' }
+      });
+    }
+
+    // STEP 2: Create contact object
+    const contact = {
+      id: Date.now().toString(),
+      name,
+      email,
+      projectType: projectType || 'general',
+      message,
+      budget: budget || 'not specified',
+      createdAt: new Date().toISOString()
+    };
+
+    // STEP 3: Save to memory (in-memory database)
+    contacts.push(contact);
+    console.log(`✅ Contact saved: ${contact.id}`);
+
+    // STEP 4: Send emails (fire and forget - don't wait)
+    sendEmails(contact).catch(err => {
+      console.error('❌ Email failed:', err.message);
+    });
+
+    // STEP 5: Send success response immediately
+    res.status(201).json({
+      success: true,
+      message: 'Message sent successfully! We will get back to you soon.',
+      data: {
+        id: contact.id,
+        name: contact.name,
+        email: contact.email
+      }
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
 // ============================================
-// ERROR HANDLING MIDDLEWARE
+// EMAIL SYSTEM (Simple & Free)
 // ============================================
 
-app.use(errorHandler);
+const nodemailer = require('nodemailer');
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD
+  }
+});
+
+async function sendEmails(contact) {
+  try {
+    // EMAIL 1: Send to YOU (owner)
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      to: process.env.EMAIL_USER,
+      subject: `New Contact from ${contact.name}`,
+      html: `
+        <h2>New Contact Submission</h2>
+        <p><strong>From:</strong> ${contact.name}</p>
+        <p><strong>Email:</strong> ${contact.email}</p>
+        <p><strong>Project:</strong> ${contact.projectType}</p>
+        <p><strong>Budget:</strong> ${contact.budget}</p>
+        <h3>Message:</h3>
+        <p>${contact.message.replace(/\n/g, '<br>')}</p>
+        <hr>
+        <p><small>Received: ${contact.createdAt}</small></p>
+      `
+    });
+    console.log(`✅ Owner email sent to ${process.env.EMAIL_USER}`);
+
+    // EMAIL 2: Send confirmation to USER
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM,
+      to: contact.email,
+      subject: 'Thank you for contacting us!',
+      html: `
+        <h2>Thank you, ${contact.name}!</h2>
+        <p>We received your message and will get back to you as soon as possible.</p>
+        <hr>
+        <h3>Your Message Details:</h3>
+        <p><strong>Project Type:</strong> ${contact.projectType}</p>
+        <p><strong>Budget:</strong> ${contact.budget}</p>
+        <p><strong>Message:</strong></p>
+        <p>${contact.message.replace(/\n/g, '<br>')}</p>
+        <hr>
+        <p>Best regards,<br>MB.Dev</p>
+      `
+    });
+    console.log(`✅ Confirmation email sent to ${contact.email}`);
+
+  } catch (error) {
+    console.error('Email error:', error.message);
+  }
+}
 
 // ============================================
-// DATABASE CONNECTION & SERVER STARTUP
+// START SERVER
 // ============================================
 
 const PORT = process.env.PORT || 5000;
-const NODE_ENV = process.env.NODE_ENV || 'development';
-
-// Connect to MongoDB and start server
-connectDB()
-  .then(() => {
-    app.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT}`);
-      logger.info(`Environment: ${NODE_ENV}`);
-      logger.info(`Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
-    });
-  })
-  .catch((err) => {
-    logger.error('❌ Failed to connect to MongoDB:', err);
-    process.exit(1);
-  });
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  logger.error('Unhandled Rejection:', err);
-  process.exit(1);
+app.listen(PORT, () => {
+  console.log(`✅ Backend running on port ${PORT}`);
+  console.log(`🔗 Frontend: ${process.env.FRONTEND_URL}`);
+  console.log(`📧 Owner email: ${process.env.EMAIL_USER}`);
 });
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  logger.error('Uncaught Exception:', err);
-  process.exit(1);
-});
-
-module.exports = app;  

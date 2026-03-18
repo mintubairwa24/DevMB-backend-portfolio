@@ -17,11 +17,19 @@
     "express-rate-limit": "^8.3.1",
     "helmet": "^8.1.0",
     "mongodb": "^7.1.0",
-    "mongoose": "^9.3.0",
-    "nodemailer": "^8.0.2",
+    "mongoose": "^9.3.1",
+    "nodemailer": "^8.0.3",
     "validator": "^13.15.26"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mintubairwa24/DevMB-backend-portfolio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mintubairwa24/DevMB-backend-portfolio/issues"
+  },
+  "homepage": "https://github.com/mintubairwa24/DevMB-backend-portfolio#readme"
 }
