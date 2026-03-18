@@ -31,12 +31,14 @@ exports.createContact = async (req, res, next) => {
 
     logger.info(`Contact created successfully: ${contact._id}`);
 
-    // Send emails in background so slow SMTP doesn't block the response
+    // Send emails in background so the request doesn't wait on the email provider
     setImmediate(async () => {
+      const portfolioInbox = process.env.EMAIL_TO || process.env.EMAIL_USER;
+
       // Send email notification to portfolio owner
       try {
         await sendEmail({
-          to: process.env.EMAIL_USER,
+          to: portfolioInbox,
           subject: `New Contact: ${name} - ${projectType}`,
           html: `
             <h2>New Contact Submission</h2>

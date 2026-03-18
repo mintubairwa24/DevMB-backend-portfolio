@@ -1,10 +1,14 @@
 // server.js
 // Main server file - Express setup, MongoDB connection, and middleware configuration
 
+const dns = require('dns');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 require('dotenv').config();
+
+// Prefer IPv4 when resolving outbound hosts to avoid IPv6 connectivity issues on some platforms.
+dns.setDefaultResultOrder('ipv4first');
 
 // Database connection
 const connectDB = require('./config/database');
@@ -28,22 +32,25 @@ const app = express();
 
 // Helmet - Add security headers
 app.use(helmet());
-app.disable('x-powered-by');
 
 // CORS - Allow requests from frontend
-// Support comma-separated origins in FRONTEND_URLS, fallback to FRONTEND_URL or localhost
+// Support comma-separated origins in FRONTEND_URLS, fallback to FRONTEND_URL or localhost.
+// Entries can be exact origins or simple wildcards like https://my-app-*.vercel.app
 const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || 'http://localhost:5173')
   .split(',')
   .map((o) => o.trim())
-  .filter(Boolean)
-  .map((o) => o.replace(/\/+$/, '').toLowerCase());
+  .filter(Boolean);
 
 const isProd = (process.env.NODE_ENV || 'development') === 'production';
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const matchesAllowedOrigin = (origin) =>
+  allowedOrigins.some((allowedOrigin) => {
+    if (allowedOrigin === origin) return true;
+    if (!allowedOrigin.includes('*')) return false;
 
-// If running behind a proxy (common in production), trust the first hop
-if (isProd || process.env.TRUST_PROXY === '1') {
-  app.set('trust proxy', 1);
-}
+    const pattern = `^${escapeRegex(allowedOrigin).replace(/\\\*/g, '.*')}$`;
+    return new RegExp(pattern).test(origin);
+  });
 
 app.use(cors({
   origin: (origin, cb) => {
@@ -51,19 +58,11 @@ app.use(cors({
     if (!origin) return cb(null, true);
     // In development, allow any origin to avoid local CORS friction
     if (!isProd) return cb(null, true);
-
-    const normalizedOrigin = origin.replace(/\/+$/, '').toLowerCase();
-    if (allowedOrigins.length === 0) {
-      logger.warn('No FRONTEND_URL(S) configured; allowing all origins in production.');
-      return cb(null, true);
-    }
-    if (allowedOrigins.includes(normalizedOrigin)) return cb(null, true);
-    const corsError = new Error(`CORS blocked for origin: ${origin}`);
-    corsError.status = 403;
-    return cb(corsError);
+    if (matchesAllowedOrigin(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
@@ -81,7 +80,7 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // RATE LIMITING MIDDLEWARE
 // ============================================
 
-app.use('/api', rateLimitMiddleware);
+app.use('/api/', rateLimitMiddleware);
 
 // ============================================
 // LOGGING MIDDLEWARE
@@ -140,7 +139,7 @@ connectDB()
     });
   })
   .catch((err) => {
-    logger.error('Failed to connect to MongoDB:', err);
+    logger.error('❌ Failed to connect to MongoDB:', err);
     process.exit(1);
   });
 
@@ -156,4 +155,4 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
-module.exports = app;
+module.exports = app;  
